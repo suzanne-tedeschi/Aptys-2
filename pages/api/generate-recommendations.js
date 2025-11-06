@@ -2,6 +2,8 @@ import OpenAI from 'openai';
 import { generateMedicalSummary } from '../../lib/medicalSummaryGenerator';
 import { MEDICAL_SYSTEM_PROMPT, USER_PROMPT_TEMPLATE } from '../../lib/medicalPrompt';
 import { supabase } from '../../lib/supabase';
+import pdf from 'pdf-parse';
+const { readEncryptedFile } = require('../../lib/storage');
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -24,10 +26,83 @@ export default async function handler(req, res) {
     }
 
     // ============================================
-    // 1. GÉNÉRER LE RÉSUMÉ MÉDICAL
+    // 1. GÉNÉRER LE RÉSUMÉ MÉDICAL + EXTRAITS DES PDF UPLOADÉS
     // ============================================
     console.log('📄 Génération du résumé médical...');
-    const medicalSummary = generateMedicalSummary(formData);
+    let medicalSummary = generateMedicalSummary(formData);
+
+    // Récupérer les documents uploadés pour cet utilisateur (si présents)
+    try {
+      const { data: docs, error: docsError } = await supabase
+        .from('uploaded_documents')
+        .select('*')
+        .eq('user_id', userId)
+        .is('deleted_at', null);
+
+      if (docsError) {
+        console.warn('⚠️ Impossible de récupérer les documents uploadés:', docsError.message || docsError);
+      } else if (docs && docs.length > 0) {
+        console.log(`📎 Trouvé ${docs.length} document(s) uploadés pour l'utilisateur ${userId}`);
+
+        let extractedSection = '\n=== COMPTE-RENDUS PDF (EXTRAITS AUTOMATIQUES) ===\n';
+
+        for (const d of docs) {
+          try {
+            if (!d.storage_path) continue;
+
+            // Préférer le fichier texte compagnon s'il existe (extrait sauvegardé à l'upload)
+            const companionPath = `${d.storage_path}.txt`;
+            let text = '';
+            try {
+              const companionBuf = readEncryptedFile(companionPath);
+              if (companionBuf) {
+                text = companionBuf.toString('utf8').trim();
+              } else {
+                // Si pas de compagnon, lire le fichier original et tenter extraction
+                const buf = readEncryptedFile(d.storage_path);
+                if (!buf) {
+                  console.warn(`Fichier non trouvé en stockage local: ${d.storage_path}`);
+                  continue;
+                }
+
+                if (d.mime_type && d.mime_type.includes('pdf')) {
+                  try {
+                    const parsed = await pdf(buf);
+                    text = (parsed && parsed.text) ? parsed.text.trim() : '';
+                  } catch (parseErr) {
+                    console.warn(`Erreur extraction PDF pour ${d.original_filename}:`, parseErr.message || parseErr);
+                    text = '';
+                  }
+                } else {
+                  // Non-PDF — pas d'extraction automatique
+                  text = '';
+                }
+              }
+            } catch (readErr) {
+              console.warn('Erreur lecture fichier compagnon/original :', readErr.message || readErr);
+              text = '';
+            }
+
+            if (!text || text.length < 50) {
+              extractedSection += `\n--- ${d.original_filename} (${d.screening_type || d.document_category || 'document'}) ---\n`;
+              extractedSection += `[Aucun texte extrait automatiquement — document possible en image/scanné. Mettre en place OCR si nécessaire]\n\n`;
+            } else {
+              const excerpt = text.length > 12000 ? text.slice(0, 12000) + '\n...[truncated]' : text;
+              extractedSection += `\n--- ${d.original_filename} (${d.screening_type || d.document_category || 'document'}) ---\n`;
+              extractedSection += excerpt + '\n\n';
+            }
+
+          } catch (errDoc) {
+            console.warn('Erreur pendant le traitement du document:', errDoc.message || errDoc);
+            continue;
+          }
+        }
+
+        medicalSummary += '\n' + extractedSection;
+      }
+    } catch (docFetchErr) {
+      console.error('Erreur lors de la récupération/extraction des documents uploadés :', docFetchErr.message || docFetchErr);
+    }
     
     // Log pour debug (optionnel - à retirer en production)
     console.log('--- RÉSUMÉ MÉDICAL GÉNÉRÉ ---');
@@ -54,6 +129,7 @@ export default async function handler(req, res) {
         },
         {
           role: 'user',
+          // On envoie le résumé médical augmenté des extraits de PDF (s'ils existent)
           content: USER_PROMPT_TEMPLATE(medicalSummary)
         }
       ]

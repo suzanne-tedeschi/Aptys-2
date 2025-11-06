@@ -1,5 +1,6 @@
 import { saveEncryptedFile } from '../../lib/storage';
 import { supabase } from '../../lib/supabase';
+import pdf from 'pdf-parse';
 
 export default async function handler(req, res){
   if(req.method !== 'POST') return res.status(405).end();
@@ -16,6 +17,25 @@ export default async function handler(req, res){
   
   // Sauvegarder le fichier chiffré localement
   saveEncryptedFile(storagePath, buffer);
+  // Si PDF, tenter d'extraire le texte ET sauvegarder un fichier texte chiffré compagnon
+  if ((req.body.mimeType || 'application/pdf').includes('pdf')) {
+    try {
+      const parsed = await pdf(buffer);
+      const text = parsed && parsed.text ? parsed.text.trim() : '';
+      if (text && text.length > 20) {
+        const textPath = `${storagePath}.txt`;
+        saveEncryptedFile(textPath, Buffer.from(text, 'utf8'));
+        // stocker une petite indication dans la description pour retrouver le companion
+        documentData.description = JSON.stringify({ extracted_text_path: textPath });
+      } else {
+        // texte trop court ou absent -> possible scan, on n'active pas l'OCR pour l'instant
+        documentData.description = JSON.stringify({ extracted_text_path: null, note: 'no_text_extracted' });
+      }
+    } catch (err) {
+      console.warn('Erreur extraction PDF à l\'upload:', err.message || err);
+      documentData.description = JSON.stringify({ extracted_text_path: null, note: 'extraction_failed' });
+    }
+  }
   
   // Enregistrer les métadonnées dans Supabase
   const documentData = {

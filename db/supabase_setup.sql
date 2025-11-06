@@ -116,6 +116,9 @@ CREATE TABLE uploaded_documents (
     -- Stockage (chemin Supabase Storage ou fichier chiffré)
     storage_path VARCHAR(500) NOT NULL,
     encryption_algorithm VARCHAR(50) DEFAULT 'AES-256-GCM',
+    -- Chemin vers l'extrait texte compagnon (fichier .txt chiffré) et extrait court
+    extracted_text_path VARCHAR(500),
+    extracted_text_snippet TEXT,
     
     -- Type de document (compte-rendu de dépistage, autre document médical)
     document_type VARCHAR(50),

@@ -13,6 +13,20 @@ Installation
 2. npm install
 3. npm run dev
 
+Supabase / Déploiement
+----------------------
+
+1. Copier `.env.example` en `.env.local` et remplir les variables :
+	- `NEXT_PUBLIC_SUPABASE_URL` et `NEXT_PUBLIC_SUPABASE_ANON_KEY` (valeurs du projet Supabase "Aptys").
+	- `SUPABASE_SERVICE_ROLE_KEY` (à conserver en secret, serveur seulement).
+	- `STORAGE_KEY` (base64, 32 bytes) utilisé pour chiffrer les fichiers locaux.
+
+2. Pour créer les tables dans votre projet Supabase, exécutez le SQL contenu dans `db/supabase_setup.sql` depuis l'éditeur SQL de Supabase ou via psql (voir `scripts/import_supabase.sh`).
+
+3. Si vous migrez des données depuis un ancien projet, utilisez `pg_dump` / `pg_restore` ou export CSV et import via l'interface Supabase. Faites une sauvegarde avant toute opération destructive.
+
+Important: Ne commitez jamais vos clés (`.env.local`) dans le dépôt public. Utilisez les variables d'environnement du service d'hébergement pour déployer en production.
+
 Endpoints importants
 - POST /api/user/create -> crée un utilisateur et retourne userId
 - POST /api/user/{id}/draft -> sauvegarde un brouillon
