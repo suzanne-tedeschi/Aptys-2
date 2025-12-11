@@ -28,11 +28,28 @@ export default async function handler(req, res){
       .select('*')
       .eq('user_id', id)
       .eq('is_active', true);
+
+    // Récupérer la dernière analyse médicale
+    const { data: analysisData } = await supabase
+      .from('medical_analyses')
+      .select('*')
+      .eq('user_id', id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
     
     return res.json({
       id: user.id,
       ...personalData,
-      recommendations: recommendations || []
+      recommendations: recommendations || [],
+      analysis: analysisData ? {
+        complexity_score: analysisData.complexity_score,
+        complexity_reason: analysisData.complexity_reason,
+        key_findings: analysisData.key_findings,
+        red_flags: analysisData.red_flags
+      } : null,
+      timeline: analysisData ? analysisData.timeline : [],
+      questions_for_doctor: analysisData ? analysisData.questions_for_doctor : []
     });
   }
 

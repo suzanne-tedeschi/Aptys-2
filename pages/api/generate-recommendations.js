@@ -77,15 +77,17 @@ export default async function handler(req, res) {
       console.error('Réponse brute:', responseText);
       
       return res.status(500).json({ 
+        message: 'Erreur de lecture de la réponse IA (JSON invalide)',
         error: 'Failed to parse GPT-4o response',
-        details: parseError.message,
-        rawResponse: responseText
+        details: parseError.message
       });
     }
 
     // Validation de la structure
     if (!gptResponse.recommendations || !Array.isArray(gptResponse.recommendations)) {
+      console.error('❌ Structure de réponse invalide:', JSON.stringify(gptResponse, null, 2));
       return res.status(500).json({ 
+        message: 'Structure de réponse IA invalide',
         error: 'Invalid response structure from GPT-4o',
         response: gptResponse
       });
@@ -96,16 +98,42 @@ export default async function handler(req, res) {
     // ============================================
     console.log(`💾 Sauvegarde de ${gptResponse.recommendations.length} recommandations dans Supabase...`);
 
+    // 4a. Sauvegarder l'analyse médicale (Nouvelle table)
+    // Note: Nécessite la table 'medical_analyses'
+    if (gptResponse.analysis) {
+      const { error: analysisError } = await supabase
+        .from('medical_analyses')
+        .insert({
+          user_id: userId,
+          complexity_score: gptResponse.analysis.complexity_score,
+          complexity_reason: gptResponse.analysis.complexity_reason,
+          key_findings: gptResponse.analysis.key_findings,
+          red_flags: gptResponse.analysis.red_flags,
+          timeline: gptResponse.timeline,
+          questions_for_doctor: gptResponse.questions_for_doctor,
+          full_response: gptResponse
+        });
+      
+      if (analysisError) {
+        console.error('⚠️ Erreur lors de la sauvegarde de l\'analyse (table medical_analyses manquante ?):', analysisError.message);
+        // On ne bloque pas le flux, car la table peut ne pas encore exister
+      } else {
+        console.log('✅ Analyse médicale sauvegardée');
+      }
+    }
+
     const recommendationsToInsert = gptResponse.recommendations.map(rec => ({
       user_id: userId,
       recommendation_code: rec.id,
       recommendation_name: rec.name,
+      category: rec.category,
       interval_recommendation: rec.interval,
       age_start: rec.age_start || null,
       age_end: rec.age_end || null,
       evidence_level: rec.evidence_level,
       source_reference: rec.source,
       reasoning: rec.reasoning,
+      note: rec.note,
       priority: rec.priority || 3,
       engine_version: 'GPT-4o',
       is_active: true
